@@ -14,8 +14,27 @@ android {
         versionName '1.0'
     }
 
+    signingConfigs {
+        hub {
+            storeFile file('familyhub.keystore')
+            storePassword 'familyhub'
+            keyAlias 'familyhub'
+            keyPassword 'familyhub'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.hub
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-auth:22.0.0'
 }
