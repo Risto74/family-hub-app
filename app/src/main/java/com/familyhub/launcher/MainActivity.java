@@ -102,6 +102,10 @@ public class MainActivity extends Activity {
             }
         });
 
+        Intent first = getIntent();
+        if (first != null && first.getData() != null && "familyhub".equals(first.getData().getScheme())) {
+            storeSpotifyCallback(first.getData());
+        }
         web.loadUrl(HOME_URL);
         hideSystemUi();
     }
@@ -123,9 +127,30 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        Uri d = intent == null ? null : intent.getData();
+        if (d != null && "familyhub".equals(d.getScheme())) {
+            storeSpotifyCallback(d);
+            if (web != null) {
+                web.evaluateJavascript("window.onSpotifyCb && window.onSpotifyCb()", null);
+            }
+            return;
+        }
         // Pressing Home while the dashboard is open resets it to the main view.
         if (web != null) {
             web.evaluateJavascript("window.hubHome && window.hubHome()", null);
+        }
+    }
+
+    private String spotifyCallback = "";
+
+    private void storeSpotifyCallback(Uri d) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("code", d.getQueryParameter("code") == null ? "" : d.getQueryParameter("code"));
+            o.put("state", d.getQueryParameter("state") == null ? "" : d.getQueryParameter("state"));
+            o.put("error", d.getQueryParameter("error") == null ? "" : d.getQueryParameter("error"));
+            spotifyCallback = o.toString();
+        } catch (Exception ignored) {
         }
     }
 
@@ -294,6 +319,55 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void requestGoogleToken() {
             runOnUiThread(() -> MainActivity.this.requestGoogleToken());
+        }
+
+        /** Returns the pending Spotify sign-in result as JSON, or "" if none. Clears it. */
+        @JavascriptInterface
+        public String takeSpotifyCallback() {
+            String s = spotifyCallback;
+            spotifyCallback = "";
+            return s;
+        }
+
+        /** Sets screen brightness for this screen only. 0.0 to 1.0, or -1 for the system setting. */
+        @JavascriptInterface
+        public void setBrightness(final float level) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    WindowManager.LayoutParams lp = getWindow().getAttributes();
+                    lp.screenBrightness = level;
+                    getWindow().setAttributes(lp);
+                }
+            });
+        }
+
+        /** Starts the default voice assistant. Falls back to opening the Gemini app. */
+        @JavascriptInterface
+        public void assist() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    String[] actions = {Intent.ACTION_ASSIST, Intent.ACTION_VOICE_COMMAND};
+                    for (String a : actions) {
+                        try {
+                            Intent i = new Intent(a);
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(i);
+                            return;
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    try {
+                        Intent i = getPackageManager().getLaunchIntentForPackage("com.google.android.apps.bard");
+                        if (i != null) {
+                            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            startActivity(i);
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
         }
 
         @JavascriptInterface
