@@ -1,10 +1,15 @@
 package com.familyhub.launcher;
 
 import android.app.Activity;
+import android.content.IntentSender;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.util.Base64;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -20,10 +25,17 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import com.google.android.gms.auth.api.identity.AuthorizationRequest;
+import com.google.android.gms.auth.api.identity.AuthorizationResult;
+import com.google.android.gms.auth.api.identity.Identity;
+import com.google.android.gms.common.api.Scope;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -145,6 +157,54 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static final int REQ_AUTH = 4711;
+
+    /** Asks Google for a Calendar access token and sends it to the page as window.onGoogleToken(token, error). */
+    private void requestGoogleToken() {
+        try {
+            AuthorizationRequest req = AuthorizationRequest.builder()
+                    .setRequestedScopes(Arrays.asList(new Scope("https://www.googleapis.com/auth/calendar")))
+                    .build();
+            Identity.getAuthorizationClient(this).authorize(req)
+                    .addOnSuccessListener(result -> {
+                        if (result.hasResolution()) {
+                            try {
+                                startIntentSenderForResult(result.getPendingIntent().getIntentSender(),
+                                        REQ_AUTH, null, 0, 0, 0);
+                            } catch (IntentSender.SendIntentException e) {
+                                sendToken(null, "Could not open the Google consent screen");
+                            }
+                        } else {
+                            sendToken(result.getAccessToken(), null);
+                        }
+                    })
+                    .addOnFailureListener(e -> sendToken(null, String.valueOf(e.getMessage())));
+        } catch (Exception e) {
+            sendToken(null, String.valueOf(e.getMessage()));
+        }
+    }
+
+    private void sendToken(final String token, final String error) {
+        final String js = "window.onGoogleToken && window.onGoogleToken("
+                + (token == null ? "null" : JSONObject.quote(token)) + ","
+                + (error == null ? "null" : JSONObject.quote(error)) + ")";
+        runOnUiThread(() -> web.evaluateJavascript(js, null));
+    }
+
+    @Override
+    @SuppressWarnings("deprecation")
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_AUTH) {
+            try {
+                AuthorizationResult r = Identity.getAuthorizationClient(this).getAuthorizationResultFromIntent(data);
+                sendToken(r.getAccessToken(), null);
+            } catch (Exception e) {
+                sendToken(null, "Sign-in was cancelled or failed: " + e.getMessage());
+            }
+        }
+    }
+
     private void openExternal(Uri u) {
         try {
             Intent i = new Intent(Intent.ACTION_VIEW, u);
@@ -212,6 +272,28 @@ public class MainActivity extends Activity {
             } catch (Exception ignored) {
             }
             return arr.toString();
+        }
+
+        /** Returns the app's launcher icon as a base64 PNG (96x96), or "" if not installed. */
+        @JavascriptInterface
+        public String getIcon(String pkg) {
+            try {
+                Drawable d = getPackageManager().getApplicationIcon(pkg);
+                Bitmap bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
+                Canvas cv = new Canvas(bmp);
+                d.setBounds(0, 0, 96, 96);
+                d.draw(cv);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, out);
+                return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        @JavascriptInterface
+        public void requestGoogleToken() {
+            runOnUiThread(() -> MainActivity.this.requestGoogleToken());
         }
 
         @JavascriptInterface
